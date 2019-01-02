@@ -88,6 +88,19 @@ func probeHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("Found value %v", res)
+
+		bln, ok := res.(bool)
+		//var bitSetVar interface{}
+		if !ok {
+			log.Printf("res is not a boolean")
+		} else {
+  		if bln {
+		  	res = 1.0
+	    } else {
+		    res = 0.0
+	    }
+		}
+
 		number, ok := res.(float64)
 		if !ok {
 			http.Error(w, "Values could not be parsed to Float64", http.StatusInternalServerError)
