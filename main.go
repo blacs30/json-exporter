@@ -5,12 +5,14 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/prometheus/client_golang/prometheus"
 	"crypto/tls"
-	"github.com/oliveagle/jsonpath"
-	"io/ioutil"
+	"encoding/base64"
 	"encoding/json"
+	"io/ioutil"
+
+	"github.com/oliveagle/jsonpath"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var addr = flag.String("listen-address", ":9116", "The address to listen on for HTTP requests.")
@@ -32,6 +34,11 @@ func main() {
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
 
+func basicAuth(username, password string) string {
+	auth := username + ":" + password
+	return base64.StdEncoding.EncodeToString([]byte(auth))
+}
+
 func probeHandler(w http.ResponseWriter, r *http.Request) {
 
 	params := r.URL.Query()
@@ -41,10 +48,13 @@ func probeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lookuppath := params.Get("jsonpath")
-	if target == "" {
+	if lookuppath == "" {
 		http.Error(w, "The JsonPath to lookup", 400)
 		return
 	}
+	username := params.Get("username")
+	password := params.Get("password")
+
 	probeSuccessGauge := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "probe_success",
 		Help: "Displays whether or not the probe was a success",
@@ -55,8 +65,8 @@ func probeHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	valueGauge := prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Name:	"value",
-			Help:	"Retrieved value",
+			Name: "value",
+			Help: "Retrieved value",
 		},
 	)
 	registry := prometheus.NewRegistry()
@@ -67,8 +77,15 @@ func probeHandler(w http.ResponseWriter, r *http.Request) {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
+
+	req, err := http.NewRequest("GET", target, nil)
+	req.Header.Add("Authorization", "Basic "+basicAuth(username, password))
+
 	client := &http.Client{Transport: tr}
-	resp, err := client.Get(target)
+	resp, err := client.Do(req)
+
+	//	client := &http.Client{Transport: tr}
+	//	resp, err := client.Get(target)
 	if err != nil {
 		log.Fatal(err)
 
@@ -85,6 +102,7 @@ func probeHandler(w http.ResponseWriter, r *http.Request) {
 		res, err := jsonpath.JsonPathLookup(json_data, lookuppath)
 		if err != nil {
 			http.Error(w, "Jsonpath not found", http.StatusNotFound)
+			log.Printf("Error is %v", err)
 			return
 		}
 		log.Printf("Found value %v", res)
@@ -94,11 +112,11 @@ func probeHandler(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			log.Printf("res is not a boolean")
 		} else {
-  		if bln {
-		  	res = 1.0
-	    } else {
-		    res = 0.0
-	    }
+			if bln {
+				res = 1.0
+			} else {
+				res = 0.0
+			}
 		}
 
 		number, ok := res.(float64)
